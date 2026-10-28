@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <h2>Upload</h2>
+  <form action="/upload" method="post" enctype="multipart/form-data">
+    <input type="file" name="file" required>
+    <input type="text" name="path" placeholder="Path" required>
+    <input type="text" name="name" placeholder="Name" required>
+    <button>Upload</button>
+  </form>
+
+  <h2>Download</h2>
+  <form action="/download" method="get">
+    <input type="text" name="path" placeholder="Path" required>
+    <input type="text" name="name" placeholder="Name" required>
+    <button>Download</button>
+  </form>
+
+  <h2>Get list</h2>
+  <form action="/list" method="get">
+    <input type="text" name="path" placeholder="Path" required>
+    <button>List</button>
+  </form>
+</body>
+</html>
