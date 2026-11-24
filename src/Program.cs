@@ -1,7 +1,6 @@
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 // env
@@ -20,60 +19,81 @@ string tokenExpirationDaysStr = Environment.GetEnvironmentVariable("TOKEN_EXPIRA
 if (!int.TryParse(tokenExpirationDaysStr, out int tokenExpirationDays))
     throw new InvalidOperationException("TOKEN_EXPIRATION_DAYS is not a valid integer");
 
+// optional limits (defaults: 2 GB per user incl. trash and vault, 500 MB per file)
+long MegabytesEnv(string name, long fallback) =>
+    long.TryParse(Environment.GetEnvironmentVariable(name), out var mb) && mb > 0 ? mb * 1024 * 1024 : fallback * 1024 * 1024;
+var limits = new DriveLimits(
+    QuotaBytes: MegabytesEnv("USER_QUOTA_MB", 2048),
+    MaxFileBytes: MegabytesEnv("MAX_FILE_MB", 500),
+    TrashLifetime: TimeSpan.FromDays(30));
 
 
 // services
 var builder = WebApplication.CreateBuilder(args);
-builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 500_000_000); // max 500 MB per request
-builder.Services.Configure<FormOptions>(o => o.MultipartBodyLengthLimit = 500_000_000);
+// uploads are raw bodies of one file; a little headroom for the vault's encryption overhead
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = limits.MaxFileBytes + 1024 * 1024);
 
-builder.Services.AddDbContext<AppDb>(o => o.UseSqlite("Data Source=" + databaseSqliteFile));
+var sqlitePath = Path.Combine(builder.Environment.ContentRootPath, databaseSqliteFile);
+Directory.CreateDirectory(Path.GetDirectoryName(sqlitePath)!);
+builder.Services.AddDbContext<AppDb>(o => o.UseSqlite("Data Source=" + sqlitePath));
 builder.Services.AddSingleton<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<UserManager>();
-builder.Services.AddScoped<UserEndpoints>();
+
+var filesPath = Path.Combine(builder.Environment.ContentRootPath, databaseFilesDir);
+builder.Services.AddSingleton(new BlobStore(filesPath, "." + fileExt));
+builder.Services.AddSingleton(limits);
+builder.Services.AddScoped<DriveService>();
+builder.Services.AddHostedService<TrashCleanup>();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>
     {
+        o.Cookie.Name = "udrive.session";
         o.Cookie.HttpOnly = true;
         o.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
-        o.Cookie.SameSite = SameSiteMode.Lax;
+        o.Cookie.SameSite = SameSiteMode.Lax; // blocks cross-site POST/PATCH/DELETE from carrying the cookie
         o.ExpireTimeSpan = TimeSpan.FromDays(tokenExpirationDays);
         o.SlidingExpiration = true;
         o.Events.OnRedirectToLogin = c => { c.Response.StatusCode = 401; return Task.CompletedTask; };
+        o.Events.OnRedirectToAccessDenied = c => { c.Response.StatusCode = 403; return Task.CompletedTask; };
     });
 builder.Services.AddAuthorization();
 
+// Brute-force protection for login/signup: 10 attempts per minute per IP.
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = 429;
+    o.OnRejected = async (ctx, token) =>
+        await ctx.HttpContext.Response.WriteAsJsonAsync(new { error = "TOO_MANY_ATTEMPTS" }, token);
+    o.AddPolicy("auth", ctx => RateLimitPartition.GetFixedWindowLimiter(
+        ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
+});
+
 var app = builder.Build();
 using (var scope = app.Services.CreateScope())
-    scope.ServiceProvider.GetRequiredService<AppDb>().Database.EnsureCreated();
-app.UseDefaultFiles(); // serves wwwroot/index.html at "/"
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDb>();
+    db.Database.EnsureCreated();   // new database: creates everything
+    db.CreateMissingTables();      // older database: adds tables added since (e.g. DriveItems)
+    // files uploaded before folders existed (<id>.meta files) are moved into the root folder
+    await scope.ServiceProvider.GetRequiredService<BlobStore>()
+        .ImportLegacyFiles(db, "." + metaExt, app.Logger);
+}
+
+app.UseDefaultFiles(); // serves wwwroot/index.html (the built frontend) at "/"
 app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
+app.MapAuthEndpoints();
+app.MapDriveEndpoints();
+app.MapVaultEndpoints();
 
-var filesPath = Path.Combine(app.Environment.ContentRootPath, databaseFilesDir);
-var fileEndpoints = new FileEndpoints(filesPath, "." + fileExt, "." + metaExt);
+// Unknown /api routes are real 404s; everything else is the single-page frontend.
+app.Map("/api/{**rest}", () => Results.NotFound());
+app.MapFallbackToFile("index.html");
 
-//app.MapPost("/signup", ([FromForm] SignupRequest req, UserEndpoints endpoints) => endpoints.HandleSignup(req))
-   //.DisableAntiforgery();
-
-app.MapPost("/login", (HttpContext ctx, [FromForm] LoginRequest req, UserEndpoints endpoints) => endpoints.HandleLogin(ctx, req))
-   .DisableAntiforgery();
-
-app.MapGet("/login", (IWebHostEnvironment env) =>
-    Results.File(Path.Combine(env.WebRootPath, "login.html"), "text/html"));
-
-//app.MapGet("/signup", (IWebHostEnvironment env) =>
-    //Results.File(Path.Combine(env.WebRootPath, "signup.html"), "text/html"));
-
-app.MapGet("/manager", (IWebHostEnvironment env) => 
-    Results.File(Path.Combine(env.ContentRootPath, "Views", "manager.html"), "text/html"))
-    .RequireAuthorization();
-
-app.MapPost("/upload", fileEndpoints.HandleUpload).RequireAuthorization();
-app.MapGet("/download", fileEndpoints.HandleDownload).RequireAuthorization();
-app.MapGet("/list", fileEndpoints.HandleList).RequireAuthorization();
 //app.Run("http://127.0.0.1:5000");
 app.Run("http://0.0.0.0:5000");

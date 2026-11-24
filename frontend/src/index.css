@@ -1,0 +1,31 @@
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+img,
+svg {
+  vertical-align: middle;
+}
+
+button,
+[role='button'] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+input,
+textarea {
+  min-width: 0;
+}

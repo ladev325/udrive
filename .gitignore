@@ -5,7 +5,6 @@
 
 # dotenv files
 .env
-database/
 
 # User-specific files
 *.rsuser
@@ -481,3 +480,7 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# MANUAL
+database/
+publish/

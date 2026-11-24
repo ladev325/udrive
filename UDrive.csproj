@@ -5,6 +5,7 @@
     <AllowMissingPrunePackageData>true</AllowMissingPrunePackageData>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <FrontendDir>frontend</FrontendDir>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,5 +16,34 @@
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.15" />
   </ItemGroup>
+
+  <!-- The React frontend is a separate npm project; keep its files out of the C# build. -->
+  <ItemGroup>
+    <Compile Remove="$(FrontendDir)/**" />
+    <Content Remove="$(FrontendDir)/**" />
+    <None Remove="$(FrontendDir)/**" />
+    <Content Remove="database/**" />
+    <None Remove="database/**" />
+  </ItemGroup>
+
+  <!-- Builds the frontend into wwwroot/ on the first `dotnet build`/`dotnet run`
+       (rebuild it yourself with `npm run build` in frontend/ after changing it). -->
+  <Target Name="BuildFrontend" BeforeTargets="Build" Condition="!Exists('wwwroot/index.html')">
+    <Exec Command="npm install" WorkingDirectory="$(FrontendDir)" Condition="!Exists('$(FrontendDir)/node_modules')" />
+    <Exec Command="npm run build" WorkingDirectory="$(FrontendDir)" EnvironmentVariables="NAPI_RS_FORCE_WASI=true" />
+  </Target>
+
+  <!-- `dotnet publish` always ships a fresh frontend build. -->
+  <Target Name="PublishFrontend" BeforeTargets="ComputeResolvedFilesToPublishList">
+    <Exec Command="npm install" WorkingDirectory="$(FrontendDir)" Condition="!Exists('$(FrontendDir)/node_modules')" />
+    <Exec Command="npm run build" WorkingDirectory="$(FrontendDir)" EnvironmentVariables="NAPI_RS_FORCE_WASI=true" />
+    <ItemGroup>
+      <BuiltFrontend Include="wwwroot/**" />
+      <ResolvedFileToPublish Include="@(BuiltFrontend)" Exclude="@(ResolvedFileToPublish)">
+        <RelativePath>%(BuiltFrontend.Identity)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
 
 </Project>
