@@ -489,12 +489,11 @@ function MainDashboard({ user, lang, setLang, accentColor, setAccentColor, t, on
 export default function App() {
   const [lang, setLang] = useState(() => {
     const stored = localStorage.getItem('nexus_lang');
-    return ['ru', 'ua', 'en'].includes(stored) ? stored : 'ru';
+    return ['en', 'ua', 'ru'].includes(stored) ? stored : 'en';
   });
   const [accentColor, setAccentColor] = useState(
     () => localStorage.getItem('nexus_accent') || '#22d3ee',
   );
-  // undefined = still asking the server, null = logged out.
   const [user, setUser] = useState(undefined);
 
   const t = translations[lang] || translations.en;
@@ -518,7 +517,6 @@ export default function App() {
     fetchSession()
       .then((sessionUser) => mounted && setUser(sessionUser))
       .catch(() => mounted && setUser(null));
-    // Any API call answered with 401 (expired/removed session) returns to the login screen.
     const handleUnauthorized = () => setUser(null);
     window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
     return () => {
