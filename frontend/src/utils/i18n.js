@@ -1,13 +1,13 @@
 export const LANGUAGES = [
-  { code: 'ru', label: 'Русский', short: 'RU', flag: '🇷🇺' },
-  { code: 'ua', label: 'Українська', short: 'UA', flag: '🇺🇦' },
-  { code: 'en', label: 'English', short: 'EN', flag: '🇬🇧' },
+  { code: 'en', label: 'English', short: 'EN', flag: 'GB' },
+  { code: 'ua', label: 'Українська', short: 'UA', flag: 'UA' },
+  { code: 'ru', label: 'Русский', short: 'RU', flag: 'RU' },
 ];
 
 export const LOCALES = {
-  ru: 'ru-RU',
-  ua: 'uk-UA',
   en: 'en-US',
+  ua: 'uk-UA',
+  ru: 'ru-RU',
 };
 
 export function localeFor(lang) {
